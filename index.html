@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Isaac Boss Roulette</title>
+<style>
+  * { box-sizing: border-box; }
+  body { background: #141212; color: #e8dcd1; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 32px 20px; gap: 20px; user-select: none; }
+  h1 { margin: 0; text-transform: uppercase; letter-spacing: 2px; color: #d4b895; text-align: center; }
+  .wheel-box { position: relative; width: 320px; height: 320px; max-width: 85vw; max-height: 85vw; margin: 10px 0; }
+  .arrow { position: absolute; top: -18px; left: 50%; transform: translateX(-50%); border-left: 15px solid transparent; border-right: 15px solid transparent; border-top: 30px solid #ffd166; z-index: 10; }
+  canvas { width: 100%; height: 100%; border-radius: 50%; border: 5px solid #3a322d; box-shadow: 0 0 25px #000; }
+  button#spin { background: #8c2727; color: #fff; border: 2px solid #b83b3b; padding: 16px 44px; font-size: 1.2rem; font-weight: bold; border-radius: 10px; cursor: pointer; text-transform: uppercase; letter-spacing: 1.5px; }
+  button#spin:disabled { background: #4a3f3f; border-color: #5e5252; color: #8c8282; cursor: not-allowed; }
+  #result { font-size: 1.5rem; font-weight: bold; min-height: 2.2rem; color: #ffd166; text-align: center; }
+  
+  .toggles { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; max-width: 440px; }
+  .toggle-btn {
+    background: #241f1e;
+    color: #e8dcd1;
+    border: 2px solid #3a322d;
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: opacity 0.2s, transform 0.1s;
+  }
+  .toggle-btn:active { transform: scale(0.96); }
+  .toggle-btn.off { opacity: 0.35; text-decoration: line-through; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+
+  #popup {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease;
+  }
+  #popup.show {
+    opacity: 1;
+  }
+  #popup img {
+    max-width: 85vw;
+    max-height: 75vh;
+    border-radius: 16px;
+    border: 4px solid #ffd166;
+    box-shadow: 0 0 40px rgba(255, 40, 40, 0.8);
+    transform: scale(0.7);
+    transition: transform 0.2s cubic-bezier(0.18, 0.89, 0.32, 1.28);
+  }
+  #popup.show img {
+    transform: scale(1);
+  }
+</style>
+</head>
+<body>
+
+  <h1>Куда идём в этот раз?</h1>
+  
+  <div class="wheel-box">
+    <div class="arrow"></div>
+    <canvas id="wheel" width="400" height="400"></canvas>
+  </div>
+
+  <div class="toggles" id="toggles"></div>
+
+  <button id="spin">Крутить</button>
+  <div id="result"></div>
+
+  <div id="popup">
+    <img src="https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTHg28R7ZSYUqr-FmzECK-XKT10KG6UkVAOilVROfwzug&s=10" alt="Победа">
+  </div>
+
+<script>
+  const allBosses = [
+    { name: "Блю Бейби", color: "#3b6998", active: true },
+    { name: "Мега Сатана", color: "#8c2727", active: true },
+    { name: "Агнец", color: "#524844", active: true },
+    { name: "Делириум", color: "#9e988f", text: "#141212", active: true },
+    { name: "Хаш", color: "#38666a", active: true },
+    { name: "Бист", color: "#b3471e", active: true },
+    { name: "Матерь", color: "#4f6b3c", active: true },
+    { name: "Грид", color: "#c99a2e", text: "#141212", active: true },
+    { name: "Босс Раш", color: "#683354", active: true }
+  ];
+
+  const canvas = document.getElementById("wheel");
+  const ctx = canvas.getContext("2d");
+  const btn = document.getElementById("spin");
+  const res = document.getElementById("result");
+  const togglesBox = document.getElementById("toggles");
+  const popup = document.getElementById("popup");
+
+  let rot = 0;
+  let spinning = false;
+  let audio = null;
+
+  function showPopup() {
+    popup.classList.add("show");
+    setTimeout(() => {
+      popup.classList.remove("show");
+    }, 1000);
+  }
+
+  function getActiveBosses() {
+    return allBosses.filter(b => b.active);
+  }
+
+  function renderToggles() {
+    togglesBox.innerHTML = "";
+    allBosses.forEach((boss) => {
+      const b = document.createElement("button");
+      b.className = "toggle-btn" + (boss.active ? "" : " off");
+      b.innerHTML = `<span class="dot" style="background:${boss.color}"></span>${boss.name}`;
+      b.onclick = () => {
+        if (spinning) return;
+        const activeCount = getActiveBosses().length;
+        if (boss.active && activeCount <= 1) return;
+        boss.active = !boss.active;
+        renderToggles();
+        draw(rot);
+      };
+      togglesBox.appendChild(b);
+    });
+  }
+
+  function tick() {
+    if (!audio) return;
+    const o = audio.createOscillator();
+    const g = audio.createGain();
+    o.type = "triangle";
+    o.frequency.setValueAtTime(520, audio.currentTime);
+    o.frequency.exponentialRampToValueAtTime(140, audio.currentTime + 0.04);
+    g.gain.setValueAtTime(0.2, audio.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, audio.currentTime + 0.04);
+    o.connect(g);
+    g.connect(audio.destination);
+    o.start();
+    o.stop(audio.currentTime + 0.04);
+  }
+
+  function winSound() {
+    if (!audio) return;
+    [293.66, 349.23, 440, 587.33].forEach(function(f, i) {
+      const t = audio.currentTime + i * 0.1;
+      const o = audio.createOscillator();
+      const g = audio.createGain();
+      o.type = "sawtooth";
+      o.frequency.setValueAtTime(f, t);
+      g.gain.setValueAtTime(0.12, t);
+      g.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+      o.connect(g);
+      g.connect(audio.destination);
+      o.start(t);
+      o.stop(t + 0.4);
+    });
+  }
+
+  function draw(deg) {
+    const bosses = getActiveBosses();
+    const arc = (2 * Math.PI) / bosses.length;
+    const c = 200;
+    ctx.clearRect(0, 0, 400, 400);
+    ctx.save();
+    ctx.translate(c, c);
+    ctx.rotate((deg * Math.PI) / 180);
+    ctx.translate(-c, -c);
+
+    for (let i = 0; i < bosses.length; i++) {
+      const a = i * arc;
+      ctx.beginPath();
+      ctx.moveTo(c, c);
+      ctx.arc(c, c, c, a, a + arc);
+      ctx.fillStyle = bosses[i].color;
+      ctx.fill();
+      
+      if (bosses.length > 1) {
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "#1c1817";
+        ctx.stroke();
+      }
+
+      ctx.save();
+      ctx.translate(c, c);
+      ctx.rotate(a + arc / 2);
+      ctx.textAlign = "right";
+      ctx.fillStyle = bosses[i].text || "#fff";
+      ctx.font = "bold 18px sans-serif";
+      ctx.fillText(bosses[i].name, c - 30, 6);
+      ctx.restore();
+    }
+
+    ctx.restore();
+    ctx.beginPath();
+    ctx.arc(c, c, 20, 0, 2 * Math.PI);
+    ctx.fillStyle = "#1c1817";
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = "#d4b895";
+    ctx.stroke();
+  }
+
+  function getIndex(deg) {
+    const bosses = getActiveBosses();
+    const n = ((deg % 360) + 360) % 360;
+    const p = (270 - n + 360) % 360;
+    return Math.floor(p / (360 / bosses.length));
+  }
+
+  renderToggles();
+  draw(0);
+
+  btn.onclick = function() {
+    if (spinning) return;
+    if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state === "suspended") audio.resume();
+
+    const bosses = getActiveBosses();
+    spinning = true;
+    btn.disabled = true;
+    res.textContent = "Крутим...";
+
+    const start = rot;
+    const target = start + (6 + Math.floor(Math.random() * 5)) * 360 + Math.floor(Math.random() * 360);
+    const t0 = performance.now();
+    let last = getIndex(start);
+
+    function step(now) {
+      const p = Math.min((now - t0) / 4000, 1);
+      rot = start + (target - start) * (1 - Math.pow(1 - p, 4));
+      draw(rot);
+
+      const cur = getIndex(rot);
+      if (cur !== last) {
+        tick();
+        last = cur;
+      }
+
+      if (p < 1) {
+        requestAnimationFrame(step);
+      } else {
+        spinning = false;
+        btn.disabled = false;
+        winSound();
+        showPopup();
+        res.textContent = "Цель: " + bosses[cur].name + "!";
+      }
+    }
+    requestAnimationFrame(step);
+  };
+</script>
+</body>
+</html>
+
